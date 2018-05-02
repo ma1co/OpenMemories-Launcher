@@ -7,12 +7,16 @@ import android.content.pm.ActivityInfo;
 import android.content.pm.ResolveInfo;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.View;
 import android.view.WindowManager;
+import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.ListView;
 
+import com.sony.scalar.hardware.indicator.SubLCD;
 import com.sony.scalar.sysutil.ScalarInput;
 import com.sony.scalar.sysutil.ScalarProperties;
 
@@ -36,15 +40,54 @@ public class MainActivity extends Activity {
         }
     }
 
+    public static abstract class Scroller implements Runnable {
+        private final int shortDelay = 250;
+        private final int longDelay = 1000;
+        private final Handler handler = new Handler();
+        private final int width;
+        private String text;
+        private int off;
+
+        public Scroller(int width) {
+            this.width = width;
+        }
+
+        public void setText(String text) {
+            handler.removeCallbacks(this);
+            this.text = text;
+            off = 0;
+            run();
+        }
+
+        @Override
+        public void run() {
+            if (text.length() <= width) {
+                display(text);
+            } else {
+                display(text.substring(off, off + width));
+                if (off + width < text.length()) {
+                    handler.postDelayed(this, off == 0 ? longDelay : shortDelay);
+                    off++;
+                } else {
+                    handler.postDelayed(this, longDelay);
+                    off = 0;
+                }
+            }
+        }
+
+        public abstract void display(String text);
+    }
+
     private ListView listView;
     private ArrayAdapter<AppInfo> listAdapter;
+    private Scroller scroller = null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        if (isCamera() && !hasDisplay()) {
-            // action cam
+        if (isCamera() && getPanelAspect() == 0) {
+            // new action cam
             WindowManager.LayoutParams layoutParams = getWindow().getAttributes();
             layoutParams.gravity = Gravity.TOP | Gravity.LEFT;
             layoutParams.width = 100;
@@ -66,10 +109,30 @@ public class MainActivity extends Activity {
         listView.setAdapter(listAdapter);
 
         listView.setOnItemClickListener((adapterView, view, pos, id) -> {
-            AppInfo app = listAdapter.getItem(pos);
-            if (app != null)
-                startActivity(new Intent().setComponent(app.getComponentName()).setFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            startActivity(new Intent().setComponent(listAdapter.getItem(pos).getComponentName()).setFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         });
+
+        if (isCamera() && getSubLcdType() == 1) {
+            // old action cam
+            scroller = new Scroller(SubLCD.getStringLength(SubLCD.Sub.LID_INFOMATION)) {
+                @Override
+                public void display(String text) {
+                    SubLCD.setString(SubLCD.Sub.LID_INFOMATION, true, SubLCD.PTN_ON, text);
+                }
+            };
+
+            listView.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+                @Override
+                public void onItemSelected(AdapterView<?> adapterView, View view, int pos, long id) {
+                    scroller.setText(listAdapter.getItem(pos).toString());
+                }
+
+                @Override
+                public void onNothingSelected(AdapterView<?> adapterView) {
+                    scroller.setText("");
+                }
+            });
+        }
     }
 
     @Override
@@ -90,6 +153,19 @@ public class MainActivity extends Activity {
                 }
             }
         }
+
+        if (scroller != null) {
+            int pos = listView.getSelectedItemPosition();
+            scroller.setText(pos >= 0 ? listAdapter.getItem(pos).toString() : "");
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+
+        if (scroller != null)
+            scroller.setText("");
     }
 
     @Override
@@ -104,8 +180,12 @@ public class MainActivity extends Activity {
         return "sony".equals(Build.BRAND) && "ScalarA".equals(Build.MODEL) && "dslr-diadem".equals(Build.DEVICE);
     }
 
-    public boolean hasDisplay() {
-        return ScalarProperties.getInt(ScalarProperties.PROP_DEVICE_PANEL_ASPECT, -1) != 0;
+    public int getPanelAspect() {
+        return ScalarProperties.getInt(ScalarProperties.PROP_DEVICE_PANEL_ASPECT, -1);
+    }
+
+    public int getSubLcdType() {
+        return ScalarProperties.getInt(ScalarProperties.PROP_DVICE_SUBLCD_TYPE, -1);
     }
 
     public int convertKeyCode(int scanCode) {
