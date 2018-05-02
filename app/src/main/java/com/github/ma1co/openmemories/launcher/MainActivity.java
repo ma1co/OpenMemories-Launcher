@@ -117,7 +117,7 @@ public class MainActivity extends Activity {
             scroller = new Scroller(SubLCD.getStringLength(SubLCD.Sub.LID_INFOMATION)) {
                 @Override
                 public void display(String text) {
-                    SubLCD.setString(SubLCD.Sub.LID_INFOMATION, true, SubLCD.PTN_ON, text);
+                    SubLCD.setString(SubLCD.Sub.LID_INFOMATION, !"".equals(text), SubLCD.PTN_ON, text);
                 }
             };
 
